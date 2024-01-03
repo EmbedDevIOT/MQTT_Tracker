@@ -1,5 +1,5 @@
 /*
-MQTT Service: https://www.hivemq.com/
+# MQTT Service: https://www.hivemq.com/
 # Author: EmbeddevIOT (Aleksey Baranov)
 # Date: (create to 31.12.22)
 # MCU: ESP8266
@@ -16,26 +16,40 @@ MQTT Service: https://www.hivemq.com/
 
 #define BaudSpeed 9600
 
-static const char firmware[] = {"0.2"};
+static const char firmware[] = {"0.3"};
 
 uint16_t counter = 0;
+uint8_t state = 0;
+
+enum led_state
+{
+  led_OFF = 0,
+  led_R,
+  led_G,
+  led_B,
+};
 
 struct Timers
 {
   uint8_t tim100 = 0;
-  uint16 tim1000 = 0;
+  uint32_t tim1000 = 0;
 };
 Timers TIM;
 
 // WiFi Login and Password
 const char *ssid = "AECorp2G";
 const char *password = "Ae19co90$";
+// // MQTT broker credentials (set to NULL if not required)
+// const char *mqtt_username = "ESP8266_Test";
+// const char *mqtt_password = "Ae19co90$rp";
+// // Change the variable to your Raspberry Pi IP address, so it connects to your MQTT broker
+// const char *mqtt_server = "9a52daac3a584ac8ab2a9e666381ee47.s2.eu.hivemq.cloud";
 // MQTT broker credentials (set to NULL if not required)
-const char *mqtt_username = "ESP8266_Test";
-const char *mqtt_password = "Ae19co90$rp";
+const char *mqtt_username = "u_4YVJEF";
+const char *mqtt_password = "v1HPYZgn";
 // Change the variable to your Raspberry Pi IP address, so it connects to your MQTT broker
-const char *mqtt_server = "9a52daac3a584ac8ab2a9e666381ee47.s2.eu.hivemq.cloud";
-const int mqtt_port = 8883;
+const char *mqtt_server = "m5.wqtt.ru";
+const int mqtt_port = 10073;
 
 /**** Secure WiFi Connectivity Initialisation *****/
 WiFiClientSecure espClient;
@@ -44,6 +58,9 @@ PubSubClient client(espClient);
 
 /**** LED Settings *******/
 const int led = 5; // Set LED pin as GPIO5
+
+// LEDs
+const String leds_topic = "/leds";
 
 unsigned long lastMsg = 0;
 #define MSG_BUFFER_SIZE (50)
@@ -91,6 +108,7 @@ void setup_wifi();
 void reconnect();
 void callback(char *topic, byte *payload, unsigned int length);
 void publishMessage(const char *topic, String payload, boolean retained);
+void updateStatePins();
 
 void setup()
 {
@@ -98,7 +116,13 @@ void setup()
   Serial.println("MQTT_Tracker_Started");
   Serial.printf("Firmware: %s", firmware);
 
-  pinMode(led, OUTPUT); // set up LED
+  pinMode(D4, OUTPUT); // set up LED RED
+  digitalWrite(D4, LOW);
+  pinMode(D3, OUTPUT); // set up LED GREEN
+  digitalWrite(D3, LOW);
+  pinMode(D2, OUTPUT); // set up LED BLUE
+  digitalWrite(D2, LOW);
+  // pinMode(led, OUTPUT); // set up LED
   setup_wifi();
 
 #ifdef ESP8266
@@ -124,19 +148,19 @@ void loop()
   // float humidity = dht.getHumidity();
   // float temperature = dht.getTemperature();
 
-  DynamicJsonDocument doc(1024);
+  // DynamicJsonDocument doc(1024);
 
-  doc["deviceId"] = "EmbeddevIO_device";
-  doc["siteId"] = "My Demo Lab";
-  doc["humidity"] = counter;
+  // doc["deviceId"] = "EmbeddevIO_device";
+  // doc["siteId"] = "My Demo Lab";
+  // doc["humidity"] = counter;
   // doc["temperature"] = temperature;
 
-  char mqtt_message[128];
-  serializeJson(doc, mqtt_message);
+  // char mqtt_message[128];
+  // serializeJson(doc, mqtt_message);
 
-  publishMessage("esp8266_data", mqtt_message, true);
+  // publishMessage("esp8266_data", mqtt_message, true);
 
-  delay(5000);
+  // delay(1000);
 }
 
 void Task100ms()
@@ -154,6 +178,9 @@ void Task1000ms()
     TIM.tim1000 += 1000;
 
     counter < 1000 ? counter++ : counter = 0;
+
+    publishMessage("counter_topic", String(counter).c_str(), true);
+    publishMessage("led_state", String(state).c_str(), true);
   }
 }
 
@@ -191,7 +218,9 @@ void reconnect()
     {
       Serial.println("connected");
 
-      client.subscribe("led_state"); // subscribe the topics here
+      client.subscribe( (leds_topic + "/#").c_str() );
+
+      // client.subscribe("led_state"); // subscribe the topics here
     }
     else
     {
@@ -206,20 +235,23 @@ void reconnect()
 /***** Call back Method for Receiving MQTT messages and Switching LED ****/
 void callback(char *topic, byte *payload, unsigned int length)
 {
-  String incommingMessage = "";
+  String data_pay;
   for (int i = 0; i < length; i++)
-    incommingMessage += (char)payload[i];
-
-  Serial.println("Message arrived [" + String(topic) + "]" + incommingMessage);
-
-  //--- check the incomming message
-  if (strcmp(topic, "led_state") == 0)
   {
-    if (incommingMessage.equals("1"))
-      digitalWrite(led, HIGH); // Turn the LED on
-    else
-      digitalWrite(led, LOW); // Turn the LED off
+    data_pay += String((char)payload[i]);
   }
+
+  Serial.println(data_pay);
+
+  if (String(topic) == leds_topic)
+  {
+    if (data_pay == "ON" || data_pay == "1")
+      state = led_R;
+    if (data_pay == "OFF" || data_pay == "0")
+      state = led_OFF;
+  }
+
+  updateStatePins();
 }
 
 /**** Method for Publishing MQTT Messages **********/
@@ -227,4 +259,34 @@ void publishMessage(const char *topic, String payload, boolean retained)
 {
   if (client.publish(topic, payload.c_str(), true))
     Serial.println("Message publised [" + String(topic) + "]: " + payload);
+}
+
+void updateStatePins(void)
+{
+  switch (state)
+  {
+  case led_OFF:
+    digitalWrite(D4, LOW);
+    digitalWrite(D3, LOW);
+    digitalWrite(D2, LOW);
+    break;
+  case led_R:
+    digitalWrite(D4, HIGH);
+    digitalWrite(D3, LOW);
+    digitalWrite(D2, LOW);
+    break;
+  case led_G:
+    digitalWrite(D4, LOW);
+    digitalWrite(D3, HIGH);
+    digitalWrite(D2, LOW);
+    break;
+  case led_B:
+    digitalWrite(D4, LOW);
+    digitalWrite(D3, LOW);
+    digitalWrite(D2, HIGH);
+    break;
+
+  default:
+    break;
+  }
 }
