@@ -5,7 +5,8 @@
 # Discription:
 # ########### Hardware ###########
 # MCU: ESP8266
-# WiFi + MQTT + Yandex
+# Control: WiFi + MQTT + Yandex
+# Hardware: RGB leds (True Color) Bright and Color control
 # mqtt_name: u_4YVJEF
 # mqtt_pass: v1HPYZgn
 # mqtt_server: m5.wqtt.ru
@@ -18,9 +19,10 @@
 #include "ArduinoJSON.h"
 #include <WiFiClientSecure.h>
 #include "GRGB.h"
+#include "GParser.h"
 
 #define BaudSpeed 9600
-static const char firmware[] = {"0.4"};
+static const char firmware[] = {"0.6"};
 
 // WiFi Login and Password
 const char *ssid = "AECorp2G";
@@ -41,13 +43,15 @@ enum led_state
   led_B,
 };
 
-struct Leds {
-  uint8_t bright = 0;
+struct Leds
+{
+  uint8_t bright = 255;
   uint8_t state = 0;
+  bool show = false;
   uint8_t colR = 0;
   uint8_t colG = 0;
   uint8_t colB = 0;
-  String colHEX = "0x00";
+  uint32_t colHEX = 0xF81F;
 };
 Leds LED;
 
@@ -75,17 +79,16 @@ const int mqtt_port = 10073;
 PubSubClient client(espClient);
 
 //
-const String leds_topic = "/leds";
+const String leds_topic = "/led";
 
-struct topics {
-  String cnt = "cnt"; 
-  String ledState = "ledst"; 
+struct topics
+{
+  String cnt = "cnt";
+  String ledState = "ledst";
 };
 topics TOPIC;
 
-
 // char mqtt_message[128];
-
 
 unsigned long lastMsg = 0;
 #define MSG_BUFFER_SIZE (50)
@@ -133,7 +136,7 @@ void setup_wifi();
 void reconnect();
 void callback(char *topic, byte *payload, unsigned int length);
 void publishMessage(const char *topic, String payload, boolean retained);
-void updateStatePins();
+void updateLedState(void);
 
 void setup()
 {
@@ -143,15 +146,8 @@ void setup()
 
   led.setBrightness(255);
   led.setCRT(true);
-  led.setColor(GAqua);
+  // led.setColor(GAqua);
 
-  // pinMode(D4, OUTPUT); // set up LED RED
-  // digitalWrite(D4, LOW);
-  // pinMode(D3, OUTPUT); // set up LED GREEN
-  // digitalWrite(D3, LOW);
-  // pinMode(D2, OUTPUT); // set up LED BLUE
-  // digitalWrite(D2, LOW);
-  // pinMode(led, OUTPUT); // set up LED
   setup_wifi();
 
 #ifdef ESP8266
@@ -168,16 +164,20 @@ void loop()
 {
   Task1000ms();
 
-  static uint32_t tmr;
-  if (millis() - tmr >= 5)
+  if ((LED.show == true)&&(LED.state == true))
   {
-    tmr = millis();
-    static int8_t dir = 1;
-    static int val = 0;
-    val += dir;
-    if (val == 255 || val == 0)
-      dir = -dir; // разворачиваем
-    led.setBrightness(val);
+    static uint32_t tmr;
+
+    if (millis() - tmr >= 5)
+    {
+      tmr = millis();
+      static int8_t dir = 1;
+      static int val = 0;
+      val += dir;
+      if (val == 255 || val == 0)
+        dir = -dir; // разворачиваем
+      led.setBrightness(val);
+    }
   }
 
   if (!client.connected())
@@ -222,7 +222,8 @@ void Task1000ms()
     // publishMessage("EmbedevIO", mqtt_message, true);
 
     publishMessage(TOPIC.cnt.c_str(), String(counter).c_str(), true);
-    publishMessage(TOPIC.ledState.c_str(), String(state).c_str(), true);
+    publishMessage(TOPIC.ledState.c_str(), String(LED.state).c_str(), true);
+
     // publishMessage("led_state", String(state).c_str(), true);
   }
 }
@@ -283,28 +284,49 @@ void callback(char *topic, byte *payload, unsigned int length)
   {
     data_pay += String((char)payload[i]);
   }
-
+  Serial.println(topic);
   Serial.println(data_pay);
 
   if (String(topic) == leds_topic)
   {
     if (data_pay == "ON" || data_pay == "1")
-      state = led_R;
+    {
+      LED.state = true;
+      Serial.println("LED_ON");
+    }
     if (data_pay == "OFF" || data_pay == "0")
-      state = led_OFF;
+    {
+      LED.state = false;
+      Serial.println("LED_OFF");
+    }
   }
 
   if (String(topic) == (leds_topic + "/brig"))
   {
+    uint8_t tmp = 0;
+    LED.state = true;
     LED.bright = data_pay.toInt();
-    Serial.println(LED.bright);
+    publishMessage("st_brig", String(LED.bright).c_str(), true);
+    tmp = map(LED.bright, 0, 100, 0, 255);
+    LED.bright = tmp;
   }
 
   if (String(topic) == (leds_topic + "/color"))
   {
-    String(LED.colHEX) = data_pay;
+    LED.state = true;
+    String temp_col = data_pay;
+    LED.colHEX = temp_col.toInt();
+    publishMessage("st_col", String(LED.colHEX).c_str(), true);
   }
-  updateStatePins();
+
+  if (String(topic) == (leds_topic + "/show"))
+  {
+    String temp_col = data_pay;
+    LED.show = temp_col.toInt();
+    publishMessage("st_show", String(LED.show).c_str(), true);
+  }
+
+  updateLedState();
 }
 
 /**** Method for Publishing MQTT Messages **********/
@@ -314,32 +336,14 @@ void publishMessage(const char *topic, String payload, boolean retained)
     Serial.println("Message publised [" + String(topic) + "]: " + payload);
 }
 
-void updateStatePins(void)
+void updateLedState(void)
 {
-  switch (state)
+  if (LED.state == true)
   {
-  case led_OFF:
-    digitalWrite(D4, LOW);
-    digitalWrite(D3, LOW);
-    digitalWrite(D2, LOW);
-    break;
-  case led_R:
-    digitalWrite(D4, HIGH);
-    digitalWrite(D3, LOW);
-    digitalWrite(D2, LOW);
-    break;
-  case led_G:
-    digitalWrite(D4, LOW);
-    digitalWrite(D3, HIGH);
-    digitalWrite(D2, LOW);
-    break;
-  case led_B:
-    digitalWrite(D4, LOW);
-    digitalWrite(D3, LOW);
-    digitalWrite(D2, HIGH);
-    break;
-
-  default:
-    break;
+    led.setBrightness(LED.bright);
+    led.setHEX(LED.colHEX);
   }
+  else
+    // led.disable();
+    led.setBrightness(0);
 }
