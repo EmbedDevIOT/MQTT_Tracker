@@ -1,11 +1,15 @@
 /*
-# MQTT Service: https://www.hivemq.com/
+# MQTT Service: https://dash.wqtt.ru/
 # Author: EmbeddevIOT (Aleksey Baranov)
 # Date: (create to 31.12.22)
+# Discription: 
+# ########### Hardware ###########
 # MCU: ESP8266
-# WiFi + MQTT
-* mqtt_name:
-* mqtt_pass: Ae19co90$rp
+# WiFi + MQTT + Yandex
+# mqtt_name: u_4YVJEF
+# mqtt_pass: v1HPYZgn
+# mqtt_server: m5.wqtt.ru
+# mqtt_port: 10073
 */
 
 #include <Arduino.h>
